@@ -7,14 +7,16 @@ cd build
 cmake ..
 make
 
-#Running dbz2
+# Running dbz2
 **Compression**
+
 mpirun -n 2 ./dbz2 -z<options> file_to_compress
 
 **Decompression**
+
 mpirun -n 2 ./dbz2 -d<options> file_to_decompress
 
-#Options
+# Options
 -d--------decompress
 
 -z--------compress
