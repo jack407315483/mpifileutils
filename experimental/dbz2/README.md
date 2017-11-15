@@ -1,12 +1,12 @@
 # dbz2
 **Compiling dbz2**
 
-cd mpifileutils
-./buildme dependencies
-mkdir build
-cd build
-cmake ..
-make
+1. cd mpifileutils
+2. ./buildme dependencies
+3. mkdir build
+4. cd build
+5. cmake ..
+6. make
 
 # Running dbz2
 **Compression**
