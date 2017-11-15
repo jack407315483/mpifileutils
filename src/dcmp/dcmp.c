@@ -93,6 +93,7 @@ typedef enum _dcmp_field {
     DCMPF_ATIME,     /* both have the same atime */
     DCMPF_MTIME,     /* both have the same mtime */
     DCMPF_CTIME,     /* both have the same ctime */
+    DCMPF_PERM,      /* both have the same permission */
     DCMPF_CONTENT,   /* both have the same data */
     DCMPF_MAX,
 } dcmp_field;
@@ -105,6 +106,7 @@ typedef enum _dcmp_field {
 #define DCMPF_ATIME_DEPEND   (DCMPF_EXIST_DEPEND | (1 << DCMPF_ATIME))
 #define DCMPF_MTIME_DEPEND   (DCMPF_EXIST_DEPEND | (1 << DCMPF_MTIME))
 #define DCMPF_CTIME_DEPEND   (DCMPF_EXIST_DEPEND | (1 << DCMPF_CTIME))
+#define DCMPF_PERM_DEPEND    (DCMPF_EXIST_DEPEND | (1 << DCMPF_PERM))
 #define DCMPF_CONTENT_DEPEND (DCMPF_SIZE_DEPEND | (1 << DCMPF_CONTENT))
 
 uint64_t dcmp_field_depend[] = {
@@ -116,6 +118,7 @@ uint64_t dcmp_field_depend[] = {
     [DCMPF_ATIME]   = DCMPF_ATIME_DEPEND,
     [DCMPF_MTIME]   = DCMPF_MTIME_DEPEND,
     [DCMPF_CTIME]   = DCMPF_CTIME_DEPEND,
+    [DCMPF_PERM]   = DCMPF_PERM_DEPEND,
     [DCMPF_CONTENT] = DCMPF_CONTENT_DEPEND,
 };
 
@@ -226,6 +229,13 @@ static const char* dcmp_field_to_string(dcmp_field field, int simple)
             return "CTIME";
         } else {
             return "change time";
+        }
+        break;
+    case DCMPF_PERM:
+        if (simple) {
+            return "PERM";
+        } else {
+            return "permission";
         }
         break;
     case DCMPF_CONTENT:
@@ -453,12 +463,21 @@ static int dcmp_compare_data(
     /* open source file */
     int src_fd = mfu_open(src_name, O_RDONLY);
     if (src_fd < 0) {
-        return -1;
+       /* log error if there is an open failure on the 
+        * src side */
+        MFU_LOG(MFU_LOG_ERR, "Failed to open %s, error msg: %s", 
+          src_name, strerror(errno));
+        mfu_close(src_name, src_fd);
+       return -1;
     }
 
     /* open destination file */
     int dst_fd = mfu_open(dst_name, O_RDWR);
     if (dst_fd < 0) {
+       /* log error if there is an open failure on the 
+        * dst side */
+        MFU_LOG(MFU_LOG_ERR, "Failed to open %s, error msg: %s", 
+          dst_name, strerror(errno));
         mfu_close(src_name, src_fd);
         return -1;
     }
@@ -472,6 +491,10 @@ static int dcmp_compare_data(
 
     /* seek to offset in source file */
     if (mfu_lseek(src_name, src_fd, offset, SEEK_SET) == (off_t)-1) {
+       /* log error if there is an lseek failure on the 
+        * src side */
+        MFU_LOG(MFU_LOG_ERR, "Failed to lseek %s, offset: %x, error msg: %s",
+          src_name, (unsigned long)offset, strerror(errno));
         mfu_close(dst_name, dst_fd);
         mfu_close(src_name, src_fd);
         return -1;
@@ -479,6 +502,10 @@ static int dcmp_compare_data(
     
     /* seek to offset in destination file */
     if(mfu_lseek(dst_name, dst_fd, offset, SEEK_SET) == (off_t)-1) {
+       /* log error if there is an lseek failure on the 
+        * dst side */
+        MFU_LOG(MFU_LOG_ERR, "Failed to lseek %s, offset: %x, error msg: %s",  
+          dst_name, (unsigned long)offset, strerror(errno));
         mfu_close(dst_name, dst_fd);
         mfu_close(src_name, src_fd);
         return -1;
@@ -513,7 +540,19 @@ static int dcmp_compare_data(
         
         /* check for read errors */
         if (src_read < 0 || dst_read < 0) {
-            /* hit a read error */
+            /* hit a read error, now figure out if it was the 
+             * src or dest, and print file */
+            if (src_read < 0) { 
+                MFU_LOG(MFU_LOG_ERR, "Failed to read %s, error msg: %s", 
+                  src_name, strerror(errno));
+            } 
+            /* added this extra check in case both are less 
+             * than zero -- we'd want both files read 
+             * errors reported */
+            if (dst_read < 0) {
+                MFU_LOG(MFU_LOG_ERR, "Failed to read %s, error msg: %s", 
+                  dst_name, strerror(errno));
+            } 
             rc = -1;
             break;
         }
@@ -636,6 +675,9 @@ static int dcmp_compare_metadata(
     if (dcmp_option_need_compare(DCMPF_CTIME)) {
         dcmp_compare_field(ctime, DCMPF_CTIME);
     }
+    if (dcmp_option_need_compare(DCMPF_PERM)) {
+        dcmp_compare_field(ctime, DCMPF_PERM);
+    }
 
     return diff;
 }
@@ -731,9 +773,10 @@ static void dcmp_strmap_compare_data(
              * they could be the same, but we'll draw attention to them this way */
             rc = 1;
             MFU_LOG(MFU_LOG_ERR,
-                "Failed to read %s and/or %s.  Asumming contents are different.", src_p->name, dst_p->name);
+              "Failed to open, lseek, or read %s and/or %s. Assuming contents are different.",
+                 src_p->name, dst_p->name);
 
-            /* consider this to a fatal error if syncing */
+            /* consider this to be a fatal error if syncing */
             if (mfu_copy_opts->do_sync) {
                 /* TODO: fall back more gracefully here, e.g., delete dest and overwrite */
                 MFU_LOG(MFU_LOG_ERR, "Files not synced, aborting.");
